@@ -73,8 +73,17 @@ def analyze_pdf_content(pdf_path, url=None):
                 f"原始响应：{response_text[:500]}..."
             )  # 记录响应的前 500 个字符用于调试
 
-            # 清理格式
+            # 清理格式，移除可能的二进制数据
             response_text = response_text.replace("\\n", "\n").replace("\\", "")
+
+            # 添加：调用从主服务模块导入的清理函数处理可能的二进制内容
+            try:
+                from services.gemini_service import clean_pdf_content
+
+                response_text = clean_pdf_content(response_text)
+                logger.info("已清理响应文本中的二进制数据")
+            except ImportError:
+                logger.warning("无法导入 clean_pdf_content 函数，跳过响应文本清理")
 
             # 尝试提取 JSON 格式的内容
             json_match = re.search(r"```json\s*(.*?)\s*```", response_text, re.DOTALL)

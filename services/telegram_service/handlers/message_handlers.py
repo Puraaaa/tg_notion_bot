@@ -5,6 +5,7 @@ from telegram.ext import CallbackContext
 
 from config import ALLOWED_USER_IDS
 from services.gemini_service import analyze_content
+from services.notion_service.utils import extract_hashtags, remove_hashtags_from_text, merge_tags
 from utils.helpers import is_url_only
 from utils.text_formatter import (
     extract_urls_from_entities,
@@ -46,6 +47,20 @@ def process_message(update: Update, context: CallbackContext) -> None:
     # 处理消息实体，提取格式化信息
     parsed_content = parse_message_entities(text, entities)
 
+    # 从原始文本中提取 hashtag 标签
+    original_hashtags = extract_hashtags(parsed_content["text"])
+    
+    # 从文本中移除 hashtag 标签，得到用于分析的清洁文本
+    cleaned_text = remove_hashtags_from_text(parsed_content["text"])
+    
+    # 如果移除标签后文本为空或过短，保留原文本进行处理
+    if not cleaned_text.strip() or len(cleaned_text.strip()) < 10:
+        content_for_analysis = parsed_content["text"]
+        content_for_storage = parsed_content["text"]
+    else:
+        content_for_analysis = cleaned_text
+        content_for_storage = parsed_content["text"]  # 保存时使用原始文本（包含标签）
+
     # 获取创建时间
     created_at = message.date
 
@@ -64,29 +79,29 @@ def process_message(update: Update, context: CallbackContext) -> None:
             return
 
         # 给原始内容添加前缀，表明它来自包含图片的消息
-        parsed_content["text"] = f"[此内容来自包含图片的消息] {parsed_content['text']}"
-        logger.info(f"处理图片消息的文字内容，长度：{len(parsed_content['text'])} 字符")
+        content_for_storage = f"[此内容来自包含图片的消息] {content_for_storage}"
+        logger.info(f"处理图片消息的文字内容，长度：{len(content_for_storage)} 字符")
 
     # 提取所有 URL（从实体和文本）
     urls = extract_urls_from_entities(text, entities)
 
-    # 检查特殊标签
-    if "#test" in parsed_content["text"]:
+    # 检查特殊标签（从原始标签中检查）
+    if "test" in original_hashtags:
         handle_test_message(update, parsed_content)
         return
 
-    if "#todo" in parsed_content["text"]:
-        handle_todo_message(update, parsed_content["text"], created_at)
+    if "todo" in original_hashtags:
+        handle_todo_message(update, content_for_storage, created_at)
         return
 
-    # 检查是否是纯 URL 消息
-    if urls and is_url_only(parsed_content["text"]):
+    # 检查是否是纯 URL 消息（使用清洁文本检查）
+    if urls and is_url_only(cleaned_text if cleaned_text.strip() else content_for_storage):
         handle_url_message(update, urls[0], created_at)
         return
 
     # 多 URL 处理
     if len(urls) > 1:
-        handle_multiple_urls_message(update, parsed_content["text"], urls, created_at)
+        handle_multiple_urls_message(update, content_for_storage, urls, created_at)
         return
     elif len(urls) == 1:
         url = urls[0]
@@ -94,7 +109,7 @@ def process_message(update: Update, context: CallbackContext) -> None:
         url = ""
 
     # 短内容处理：如果内容不是纯 URL 且少于 200 字符，直接将内容作为摘要
-    if len(parsed_content["text"]) < 200:
+    if len(content_for_analysis) < 200:
         # 通知用户正在处理消息
         processing_msg = (
             "正在处理消息..." if not contains_photo else "正在处理图片消息的文字内容..."
@@ -102,21 +117,27 @@ def process_message(update: Update, context: CallbackContext) -> None:
         update.message.reply_text(processing_msg, parse_mode=None)  # 禁用 Markdown 解析
 
         # 仍需使用 Gemini API 分析提取标签
-        analysis_result = analyze_content(parsed_content["text"])
+        analysis_result = analyze_content(content_for_analysis)
+        
+        # 合并原始标签和 AI 标签
+        merged_tags = merge_tags(original_hashtags, analysis_result["tags"])
+        
         # 存入 Notion，但使用原始内容作为摘要
         try:
             from services.notion_service import add_to_notion
 
             # 注意：此处传递的 content 只包含文本，不包含任何图片数据
             add_to_notion(
-                content=parsed_content["text"],  # 只传递文本内容
-                summary=parsed_content["text"],  # 直接使用原始内容作为摘要
-                tags=analysis_result["tags"],
+                content=content_for_storage,  # 保存包含标签的原始内容
+                summary=cleaned_text if cleaned_text.strip() else content_for_storage,  # 摘要使用清洁文本
+                tags=merged_tags,  # 使用合并后的标签
                 url=url,
                 created_at=created_at,
             )
+            
+            tag_info = f" (包含 {len(merged_tags)} 个标签)" if merged_tags else ""
             update.message.reply_text(
-                "✅ 内容已成功保存到 Notion!", parse_mode=None
+                f"✅ 内容已成功保存到 Notion{tag_info}!", parse_mode=None
             )  # 禁用 Markdown 解析
         except Exception as e:
             logger.error(f"添加到 Notion 时出错：{e}")
@@ -134,22 +155,27 @@ def process_message(update: Update, context: CallbackContext) -> None:
     )
     update.message.reply_text(processing_msg, parse_mode=None)  # 禁用 Markdown 解析
 
-    # 使用 Gemini API 完整分析内容
-    analysis_result = analyze_content(parsed_content["text"])
+    # 使用 Gemini API 完整分析内容（使用清洁文本）
+    analysis_result = analyze_content(content_for_analysis)
+    
+    # 合并原始标签和 AI 标签
+    merged_tags = merge_tags(original_hashtags, analysis_result["tags"])
 
     # 存入 Notion
     try:
         from services.notion_service import add_to_notion
 
         add_to_notion(
-            content=parsed_content["text"],
+            content=content_for_storage,  # 保存包含标签的原始内容
             summary=analysis_result["summary"],
-            tags=analysis_result["tags"],
+            tags=merged_tags,  # 使用合并后的标签
             url=url,
             created_at=created_at,
         )
+        
+        tag_info = f" (包含 {len(merged_tags)} 个标签)" if merged_tags else ""
         update.message.reply_text(
-            "✅ 内容已成功保存到 Notion!", parse_mode=None
+            f"✅ 内容已成功保存到 Notion{tag_info}!", parse_mode=None
         )  # 禁用 Markdown 解析
     except Exception as e:
         logger.error(f"添加到 Notion 时出错：{e}")

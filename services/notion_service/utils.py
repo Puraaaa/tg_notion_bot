@@ -193,3 +193,96 @@ def extract_tags_from_categories(content, categories):
             matched_categories.append(category)
 
     return matched_categories
+
+
+def extract_hashtags(text):
+    """
+    从文本中提取所有 hashtag 标签
+
+    参数：
+    text (str): 要分析的文本
+
+    返回：
+    list: 提取的标签列表（不包含 # 符号）
+    """
+    if not text:
+        return []
+
+    # 匹配以 # 开头的标签，支持中英文、数字和下划线
+    # 标签必须以字母、中文或数字开头，可以包含字母、中文、数字、下划线和连字符
+    hashtag_pattern = r'#([a-zA-Z0-9\u4e00-\u9fff][a-zA-Z0-9\u4e00-\u9fff_-]*)'
+
+    # 查找所有匹配的标签
+    hashtags = re.findall(hashtag_pattern, text)
+
+    # 去重并返回
+    unique_hashtags = []
+    for tag in hashtags:
+        if tag not in unique_hashtags:
+            unique_hashtags.append(tag)
+
+    logger.info(f"从文本中提取到 {len(unique_hashtags)} 个hashtag标签: {unique_hashtags}")
+    return unique_hashtags
+
+
+def remove_hashtags_from_text(text):
+    """
+    从文本中移除 hashtag 标签，保持文本的可读性
+
+    参数：
+    text (str): 原始文本
+
+    返回：
+    str: 移除标签后的文本
+    """
+    if not text:
+        return text
+
+    # 移除 hashtag 标签，但保留其他内容
+    hashtag_pattern = r'#[a-zA-Z0-9\u4e00-\u9fff][a-zA-Z0-9\u4e00-\u9fff_-]*\s*'
+
+    # 替换 hashtag 为空字符串
+    cleaned_text = re.sub(hashtag_pattern, '', text)
+
+    # 清理多余的空白字符
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+
+    return cleaned_text
+
+
+def merge_tags(original_tags, ai_tags):
+    """
+    合并原始标签和 AI 生成的标签，去重并保持原始标签优先
+
+    参数：
+    original_tags (list): 从文本中提取的原始标签
+    ai_tags (list): AI 分析生成的标签
+
+    返回：
+    list: 合并后的标签列表
+    """
+    if not original_tags:
+        original_tags = []
+    if not ai_tags:
+        ai_tags = []
+
+    # 转换为小写进行比较，但保留原始大小写
+    merged_tags = []
+    seen_tags_lower = set()
+
+    # 首先添加原始标签（优先级更高）
+    for tag in original_tags:
+        tag_lower = tag.lower()
+        if tag_lower not in seen_tags_lower:
+            merged_tags.append(tag)
+            seen_tags_lower.add(tag_lower)
+
+    # 然后添加 AI 标签（如果不重复）
+    for tag in ai_tags:
+        tag_lower = tag.lower()
+        if tag_lower not in seen_tags_lower:
+            merged_tags.append(tag)
+            seen_tags_lower.add(tag_lower)
+
+    logger.info(f"标签合并完成: 原始标签 {len(original_tags)} 个，AI标签 {len(ai_tags)} 个，合并后 {len(merged_tags)} 个")
+    return merged_tags

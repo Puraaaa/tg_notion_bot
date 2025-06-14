@@ -108,12 +108,9 @@ def generate_weekly_summary(entries):
             else:
                 logger.warning("周报生成成功，但未包含引用标记")
 
-            # 预处理响应文本，确保代码块不会过长
-            processed_text = preprocess_code_blocks(response.text)
-
-            # 缓存生成的周报
-            save_to_cache(entries_hash, processed_text, "weekly_summary")
-            return processed_text
+            # 保存原始生成内容到缓存
+            save_to_cache(entries_hash, response.text, "weekly_summary")
+            return response.text
         else:
             return "无法生成周报总结，请稍后再试。"
 
@@ -125,6 +122,9 @@ def generate_weekly_summary(entries):
 def preprocess_code_blocks(text, max_length=1900):
     """
     预处理文本中的代码块，确保它们不超过 Notion API 的长度限制
+
+    注意：此函数不再直接使用，被 notion_service.database.common.process_blocks_content 替代
+    保留用于向后兼容
 
     参数：
     text (str): 包含可能的代码块的文本

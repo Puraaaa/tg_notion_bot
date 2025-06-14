@@ -228,7 +228,7 @@ def add_to_notion(content, summary, tags, url="", created_at=None):
     参数：
     content (str): 消息内容
     summary (str): AI 生成的摘要
-    tags (list): AI 生成的标签列表
+    tags (list): 合并后的标签列表（包含原始hashtag标签和AI生成的标签）
     url (str): 可选的 URL
     created_at (datetime): 创建时间
 
@@ -243,10 +243,20 @@ def add_to_notion(content, summary, tags, url="", created_at=None):
     # 确定页面标题
     title = determine_title(content, url, summary)
 
-    # 准备标签格式
+    # 准备标签格式 - 确保标签不为空且去重
     tag_objects = []
-    for tag in tags:
-        tag_objects.append({"name": tag})
+    if tags:
+        # 去重并过滤空标签
+        unique_tags = []
+        for tag in tags:
+            if tag and tag.strip() and tag.strip() not in unique_tags:
+                unique_tags.append(tag.strip())
+        
+        # 转换为 Notion 格式
+        for tag in unique_tags:
+            tag_objects.append({"name": tag})
+        
+        logger.info(f"准备添加 {len(tag_objects)} 个标签到 Notion: {[t['name'] for t in tag_objects]}")
 
     # 将内容转换为 Notion 块格式
     content_blocks = convert_to_notion_blocks(content)
@@ -328,6 +338,9 @@ def append_blocks_in_batches(page_id, blocks, batch_size=100):
     返回：
     bool: 是否成功添加所有块
     """
+    # 确保所有块都不超过最大长度限制
+    blocks = process_blocks_content(blocks)
+
     total_blocks = len(blocks)
     batches_count = (total_blocks + batch_size - 1) // batch_size  # 向上取整
 
@@ -642,7 +655,7 @@ def generate_weekly_content(entries):
 
 def extract_notion_block_content(blocks):
     """
-    从 Notion 块中提取文本内容
+    从 Notion 块中提取文本内容，确保内容不超过 API 限制
 
     参数：
     blocks (list): Notion 块列表
@@ -651,6 +664,7 @@ def extract_notion_block_content(blocks):
     str: 提取的文本内容
     """
     content = []
+    MAX_TEXT_LENGTH = 2000  # Notion API 文本长度限制
 
     for block in blocks:
         block_type = block.get("type")
@@ -694,8 +708,22 @@ def extract_notion_block_content(blocks):
         elif block_type == "code":
             text = extract_rich_text(block_data.get("rich_text", []))
             language = block_data.get("language", "")
+
+            # 处理代码块，确保不超过最大长度
             if text:
-                content.append(f"```{language}\n{text}\n```")
+                # 如果代码内容超过最大长度，分割成多个代码块
+                if len(text) > MAX_TEXT_LENGTH:
+                    # 按最大长度分块，每个块不超过最大长度
+                    for i in range(0, len(text), MAX_TEXT_LENGTH):
+                        chunk = text[i : i + MAX_TEXT_LENGTH]
+                        if i == 0:  # 第一个块
+                            content.append(f"```{language}\n{chunk}")
+                        elif i + MAX_TEXT_LENGTH >= len(text):  # 最后一个块
+                            content.append(f"{chunk}\n```")
+                        else:  # 中间块
+                            content.append(chunk)
+                else:
+                    content.append(f"```{language}\n{text}\n```")
 
     return "\n".join(content)
 
@@ -737,6 +765,12 @@ def create_auto_weekly_report():
 
     # 生成周报内容
     content = generate_weekly_content(entries)
+
+    # 将内容转换为 Notion block 格式，支持内链
+    blocks = convert_to_notion_blocks(content)
+
+    # 处理可能超过长度限制的块
+    blocks = process_blocks_content(blocks)
 
     # 创建周报
     report_url = create_weekly_report(title, content)

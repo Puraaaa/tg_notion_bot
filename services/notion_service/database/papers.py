@@ -21,6 +21,14 @@ logger = logging.getLogger(__name__)
 #     logger.warning("无法导入 Gemini 服务，将使用备用方法解析 PDF")
 #     GEMINI_AVAILABLE = False
 
+try:
+    from services.gemini_service import clean_pdf_content
+
+    CLEAN_PDF_AVAILABLE = True
+except ImportError:
+    logger.warning("无法导入 clean_pdf_content 函数，将使用内部方法清理 PDF 内容")
+    CLEAN_PDF_AVAILABLE = False
+
 
 def get_existing_dois():
     """
@@ -283,6 +291,13 @@ def download_pdf(url):
                     downloaded_size += len(chunk)
 
             logger.info(f"PDF 文件已下载到：{temp_path}")
+
+            # 验证 PDF 文件有效性
+            if not is_valid_pdf(temp_path):
+                logger.error(f"下载的文件不是有效的 PDF：{url}")
+                os.remove(temp_path)
+                return None, 0
+
             return temp_path, downloaded_size or file_size
         else:
             logger.error(f"下载 PDF 失败，状态码：{response.status_code}")
@@ -290,6 +305,59 @@ def download_pdf(url):
     except Exception as e:
         logger.error(f"下载 PDF 时出错：{e}")
         return None, 0
+
+
+def is_valid_pdf(file_path):
+    """
+    检查文件是否为有效的 PDF
+
+    参数：
+    file_path (str): PDF 文件路径
+
+    返回：
+    bool: 如果文件是有效的 PDF 则返回 True，否则返回 False
+    """
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(5).decode("latin-1", errors="ignore")
+            # 检查 PDF 文件头部标识
+            return header.startswith("%PDF-")
+    except Exception as e:
+        logger.error(f"检查 PDF 有效性时出错：{e}")
+        return False
+
+
+def process_pdf_content(content):
+    """
+    处理 PDF 内容，移除二进制垃圾数据
+
+    参数：
+    content (str): PDF 内容文本
+
+    返回：
+    str: 清理后的文本内容
+    """
+    if not content:
+        return ""
+
+    # 检测并移除 PDF 二进制尾部数据
+    if "\r\ntrailer\r\n<<" in content:
+        content = content.split("\r\ntrailer\r\n<<")[0]
+
+    # 移除其他可能的二进制数据标记
+    binary_markers = [
+        "\r\nstartxref\r\n",
+        "%%EOF",
+        "\r\n\x00\x00",
+        r"<</Size \d+/Root \d+",
+    ]
+
+    for marker in binary_markers:
+        parts = re.split(marker, content, flags=re.IGNORECASE)
+        if len(parts) > 1:
+            content = parts[0]
+
+    return content.strip()
 
 
 def check_paper_exists_in_notion(doi: str = None, zotero_id: str = None) -> bool:
@@ -463,3 +531,45 @@ def prepare_metadata_for_notion(metadata):
     #     notion_metadata['item_type'] = metadata['item_type']
 
     return notion_metadata
+
+
+def extract_and_process_pdf_content(pdf_path):
+    """
+    从 PDF 文件提取并处理文本内容，移除二进制垃圾数据
+
+    参数：
+    pdf_path (str): PDF 文件路径
+
+    返回：
+    str: 处理后的文本内容
+    """
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(pdf_path)
+        content = ""
+
+        # 限制处理页数避免过长
+        max_pages = min(20, len(reader.pages))
+
+        for i in range(max_pages):
+            page_text = reader.pages[i].extract_text()
+            if page_text:
+                content += page_text + "\n\n"
+
+        # 对提取的内容进行清理
+        if not content.strip():
+            return ""
+
+        # 使用全局清理函数或内部处理函数
+        if CLEAN_PDF_AVAILABLE:
+            cleaned_content = clean_pdf_content(content)
+        else:
+            cleaned_content = process_pdf_content(content)
+
+        logger.info(f"成功从 PDF 提取并清理了内容：{len(cleaned_content)} 字符")
+        return cleaned_content
+
+    except Exception as e:
+        logger.error(f"提取处理 PDF 内容时出错：{e}")
+        return ""

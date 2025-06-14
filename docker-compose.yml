@@ -9,9 +9,9 @@ services:
       - TZ=Asia/Shanghai
       - ZOTERO_PDF_PATH=/zotero/pdfs
       # 代理核心配置
-      - http_proxy=http://host.docker.internal:7890 
-      - https_proxy=http://host.docker.internal:7890
-      - all_proxy=socks5://host.docker.internal:7890
+      - http_proxy=http://host.docker.internal:7897 
+      - https_proxy=http://host.docker.internal:7897
+      - all_proxy=socks5://host.docker.internal:7897
       # 添加保活设置
       - KEEP_ALIVE=true
       - RETRY_INTERVAL=30
@@ -36,8 +36,8 @@ services:
       - -c
       - |
         # 双模式检测（TCP+HTTP）
-        until (timeout 1 bash -c "echo > /dev/tcp/host.docker.internal/7890") || \
-              curl -sSf http://host.docker.internal:7890 >/dev/null; do
+        until (timeout 1 bash -c "echo > /dev/tcp/host.docker.internal/7897") || \
+              curl -sSf http://host.docker.internal:7897 >/dev/null; do
           echo '等待代理服务就绪...';
           sleep 3;
         done

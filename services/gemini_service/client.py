@@ -39,8 +39,8 @@ def configure_gemini_api():
         genai.configure(api_key=GEMINI_API_KEY)
 
         # 初始化原始模型
-        _model = genai.GenerativeModel("gemini-2.0-pro-exp-02-05")
-        _vision_model = genai.GenerativeModel("gemini-2.0-pro-exp-02-05")
+        _model = genai.GenerativeModel("gemini-2.5-flash-preview-04-17")
+        _vision_model = genai.GenerativeModel("gemini-2.5-flash-preview-04-17")
 
         # 为 generate_content 方法添加速率限制
         model = _create_rate_limited_model(_model)
