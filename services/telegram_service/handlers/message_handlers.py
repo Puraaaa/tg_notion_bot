@@ -127,18 +127,20 @@ def process_message(update: Update, context: CallbackContext) -> None:
             from services.notion_service import add_to_notion
 
             # 注意：此处传递的 content 只包含文本，不包含任何图片数据
-            add_to_notion(
+            result = add_to_notion(
                 content=content_for_storage,  # 保存包含标签的原始内容
                 summary=cleaned_text if cleaned_text.strip() else content_for_storage,  # 摘要使用清洁文本
                 tags=merged_tags,  # 使用合并后的标签
                 url=url,
                 created_at=created_at,
             )
-            
-            tag_info = f" (包含 {len(merged_tags)} 个标签)" if merged_tags else ""
+
             update.message.reply_text(
-                f"✅ 内容已成功保存到 Notion{tag_info}!", parse_mode=None
-            )  # 禁用 Markdown 解析
+                f"✅ 已保存到 Notion\n"
+                f"📄 {result['title']}\n"
+                f"🔗 {result['url']}",
+                parse_mode=None
+            )
         except Exception as e:
             logger.error(f"添加到 Notion 时出错：{e}")
             update.message.reply_text(
@@ -165,18 +167,20 @@ def process_message(update: Update, context: CallbackContext) -> None:
     try:
         from services.notion_service import add_to_notion
 
-        add_to_notion(
+        result = add_to_notion(
             content=content_for_storage,  # 保存包含标签的原始内容
             summary=analysis_result["summary"],
             tags=merged_tags,  # 使用合并后的标签
             url=url,
             created_at=created_at,
         )
-        
-        tag_info = f" (包含 {len(merged_tags)} 个标签)" if merged_tags else ""
+
         update.message.reply_text(
-            f"✅ 内容已成功保存到 Notion{tag_info}!", parse_mode=None
-        )  # 禁用 Markdown 解析
+            f"✅ 已保存到 Notion\n"
+            f"📄 {result['title']}\n"
+            f"🔗 {result['url']}",
+            parse_mode=None
+        )
     except Exception as e:
         logger.error(f"添加到 Notion 时出错：{e}")
         update.message.reply_text(

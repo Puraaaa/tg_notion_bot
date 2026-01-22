@@ -58,7 +58,7 @@ def handle_url_message(update: Update, url, created_at):
         analysis_result = analyze_content(content)
 
         # 存入 Notion - add_to_notion 函数会在内容过长时自动使用分批处理
-        page_id = add_to_notion(  # noqa: F841
+        result = add_to_notion(
             content=content,
             summary=analysis_result["summary"],
             tags=analysis_result["tags"],
@@ -67,8 +67,11 @@ def handle_url_message(update: Update, url, created_at):
         )
 
         update.message.reply_text(
-            f"✅ {url} 内容已成功解析并保存到 Notion！", parse_mode=None
-        )  # 禁用 Markdown 解析
+            f"✅ 已保存到 Notion\n"
+            f"📄 {result['title']}\n"
+            f"🔗 {result['url']}",
+            parse_mode=None
+        )
 
     except Exception as e:
         logger.error(f"处理 URL 时出错：{e}")
@@ -107,7 +110,7 @@ def handle_multiple_urls_message(update: Update, content, urls, created_at):
         combined_content = f"{rich_content}\n\n{url_list_content}"
 
         # 创建 Notion 页面
-        page_id = add_to_notion(  # noqa: F841
+        result = add_to_notion(
             content=combined_content,
             summary=analysis_result["summary"],
             tags=analysis_result["tags"],
@@ -117,8 +120,10 @@ def handle_multiple_urls_message(update: Update, content, urls, created_at):
 
         # 返回成功消息
         update.message.reply_text(
-            f"✅ 消息内容及 {len(processed_urls)} 个链接的引用已保存到 Notion!",
-            parse_mode=None,  # 禁用 Markdown 解析
+            f"✅ 已保存到 Notion（包含 {len(processed_urls)} 个链接）\n"
+            f"📄 {result['title']}\n"
+            f"🔗 {result['url']}",
+            parse_mode=None,
         )
     except Exception as e:
         logger.error(f"处理多 URL 消息时出错：{e}")

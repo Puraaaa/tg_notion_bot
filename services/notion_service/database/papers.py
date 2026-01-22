@@ -3,14 +3,19 @@ import os
 import re
 import tempfile
 import time
+from datetime import datetime
 
+import pytz
 import requests
 
 from config import NOTION_PAPERS_DATABASE_ID
 
-from ..client import notion
+from ..client import get_notion_client
+from ..content_converter import convert_to_notion_blocks
+from .common import append_blocks_in_batches
 
 logger = logging.getLogger(__name__)
+notion = get_notion_client()
 
 # 导入 Gemini 服务
 # try:
@@ -89,9 +94,77 @@ def get_existing_dois():
 def add_to_papers_database(
     title, analysis, created_at=None, pdf_url=None, metadata=None, zotero_id=None
 ):
-    """将论文分析添加到论文数据库"""
-    # 原函数内容
-    pass
+    """将论文分析添加到论文数据库，返回 {page_id, title, url}"""
+    if not NOTION_PAPERS_DATABASE_ID:
+        raise ValueError("未设置论文数据库 ID")
+
+    if not created_at:
+        created_at = datetime.now(pytz.timezone("Asia/Shanghai"))
+    elif created_at.tzinfo is None:
+        created_at = pytz.timezone("Asia/Shanghai").localize(created_at)
+
+    if not analysis:
+        raise ValueError("缺少分析内容")
+
+    page_title = analysis.get("title") or title or "未命名论文"
+
+    properties = {
+        "Name": {"title": [{"text": {"content": page_title[:200]}}]},
+        "Created": {"date": {"start": created_at.isoformat()}},
+        "URL": {"url": pdf_url if pdf_url else None},
+    }
+
+    # 基础摘要/详情
+    summary_text = (analysis.get("brief_summary") or "")[:2000]
+    details_text = analysis.get("details") or ""
+    insight_text = analysis.get("insight") or ""
+
+    # 添加元数据（作者、DOI、标签等）
+    if metadata:
+        properties = add_paper_metadata_to_properties(properties, metadata)
+
+    # 额外属性：ZoteroID（如果单独传入）
+    if zotero_id:
+        properties.setdefault("ZoteroID", {"rich_text": []})
+        properties["ZoteroID"]["rich_text"] = [
+            {"text": {"content": str(zotero_id)[:200]}}
+        ]
+
+    # 内容块：摘要、洞察、详情
+    content_parts = []
+    if summary_text:
+        content_parts.append(f"## 摘要\n{summary_text}")
+    if insight_text:
+        content_parts.append(f"## 洞察\n{insight_text}")
+    if details_text:
+        content_parts.append(f"## 详情\n{details_text}")
+
+    content_text = "\n\n".join(part for part in content_parts if part)
+    content_blocks = convert_to_notion_blocks(content_text) if content_text else []
+
+    # 如果有需要分批的块，先建页再 append；否则直接带 children 创建
+    try:
+        if len(content_blocks) > 100:
+            new_page = notion.pages.create(
+                parent={"database_id": NOTION_PAPERS_DATABASE_ID},
+                properties=properties,
+            )
+            page_id = new_page["id"]
+            append_blocks_in_batches(page_id, content_blocks)
+        else:
+            new_page = notion.pages.create(
+                parent={"database_id": NOTION_PAPERS_DATABASE_ID},
+                properties=properties,
+                children=content_blocks,
+            )
+            page_id = new_page["id"]
+
+        page_url = f"https://notion.so/{page_id.replace('-', '')}"
+        logger.info(f"成功创建论文页面：{page_id}")
+        return {"page_id": page_id, "title": page_title, "url": page_url}
+    except Exception as e:
+        logger.error(f"创建论文页面时出错：{e}")
+        raise
 
 
 def add_paper_metadata_to_properties(properties, metadata):

@@ -233,7 +233,7 @@ def add_to_notion(content, summary, tags, url="", created_at=None):
     created_at (datetime): 创建时间
 
     返回：
-    str: 创建的页面 ID
+    dict: 包含 page_id, title, url 的字典
     """
     if not created_at:
         created_at = datetime.now()
@@ -299,7 +299,11 @@ def add_to_notion(content, summary, tags, url="", created_at=None):
             logger.info(
                 f"成功创建 Notion 页面并分批添加 {blocks_count} 个块：{page_id}"
             )
-            return page_id
+            return {
+                "page_id": page_id,
+                "title": title,
+                "url": f"https://notion.so/{page_id.replace('-', '')}"
+            }
         else:
             # 如果块数量不超过限制，直接创建带有子块的页面
             new_page = notion.pages.create(
@@ -319,7 +323,12 @@ def add_to_notion(content, summary, tags, url="", created_at=None):
             logger.info(
                 f"成功创建 Notion 页面：{new_page['id']}，包含 {len(content_blocks)} 个块"
             )
-            return new_page["id"]
+            page_id = new_page["id"]
+            return {
+                "page_id": page_id,
+                "title": title,
+                "url": f"https://notion.so/{page_id.replace('-', '')}"
+            }
 
     except Exception as e:
         logger.error(f"创建 Notion 页面时出错：{e}")

@@ -38,7 +38,7 @@ def handle_pdf_document(update: Update, context: CallbackContext):
         filename_metadata = extract_metadata_from_filename(document.file_name)
 
         # 添加到论文数据库
-        page_id = add_to_papers_database(
+        result = add_to_papers_database(
             title=document.file_name,
             analysis=pdf_analysis,
             created_at=created_at,
@@ -47,12 +47,18 @@ def handle_pdf_document(update: Update, context: CallbackContext):
         )
 
         update.message.reply_text(
-            "✅ PDF 论文已成功解析并添加到 Notion 数据库！\n包含详细分析和原始 PDF 文件。"
+            f"✅ 已保存到 Notion\n"
+            f"📄 {result['title']}\n"
+            f"🔗 {result['url']}",
+            parse_mode=None,
         )
 
     except Exception as e:
         logger.error(f"处理 {document.file_id} 文件时出错：{e}")
-        update.message.reply_text(f"⚠️ 处理 {document.file_id} 文件时出错：{str(e)}")
+        update.message.reply_text(
+            f"⚠️ 保存到 Notion 时出错：{str(e)}",
+            parse_mode=None,
+        )
         # 确保清理任何临时文件
         try:
             if "pdf_path" in locals():
@@ -69,7 +75,7 @@ def handle_pdf_url(update: Update, url, created_at):
         pdf_path, file_size = download_pdf(url)
 
         if not pdf_path:
-            update.message.reply_text(f"⚠️ 无法下载 {url} 文件")
+            update.message.reply_text(f"⚠️ 无法下载 {url} 文件", parse_mode=None)
             return
 
         # 提取文件名
@@ -80,7 +86,7 @@ def handle_pdf_url(update: Update, url, created_at):
         pdf_analysis = analyze_pdf_content(pdf_path)
 
         # 添加到论文数据库
-        page_id = add_to_papers_database(
+        result = add_to_papers_database(
             title=filename,
             analysis=pdf_analysis,
             created_at=created_at,
@@ -95,12 +101,18 @@ def handle_pdf_url(update: Update, url, created_at):
             pass
 
         update.message.reply_text(
-            f"✅ {url} 论文已成功解析并添加到 Notion 数据库！\n包含详细分析和原始 PDF 文件链接。"
+            f"✅ 已保存到 Notion\n"
+            f"📄 {result['title']}\n"
+            f"🔗 {result['url']}",
+            parse_mode=None,
         )
 
     except Exception as e:
         logger.error(f"处理 PDF {url} 时出错：{e}")
-        update.message.reply_text(f"⚠️ 处理 PDF {url} 时出错：{str(e)}")
+        update.message.reply_text(
+            f"⚠️ 保存到 Notion 时出错：{str(e)}",
+            parse_mode=None,
+        )
         try:
             if "pdf_path" in locals() and pdf_path and os.path.exists(pdf_path):
                 os.unlink(pdf_path)
