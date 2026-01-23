@@ -1,4 +1,6 @@
 import logging
+import os
+import tempfile
 
 from telegram import Update
 from telegram.ext import CallbackContext
@@ -6,6 +8,7 @@ from telegram.ext import CallbackContext
 from config import ALLOWED_USER_IDS
 from services.gemini_service import analyze_content
 from services.notion_service.utils import extract_hashtags, remove_hashtags_from_text, merge_tags
+from services.notion_service import upload_image_to_notion
 from utils.helpers import is_url_only
 from utils.text_formatter import (
     extract_urls_from_entities,
@@ -21,6 +24,55 @@ from .url_handlers import handle_multiple_urls_message, handle_url_message
 
 # 配置日志
 logger = logging.getLogger(__name__)
+
+
+def download_and_upload_photos(message, context) -> list:
+    """
+    下载 Telegram 消息中的图片并上传到 Notion
+
+    参数：
+        message: Telegram 消息对象
+        context: Telegram 上下文对象
+
+    返回：
+        list: 成功上传的 file_upload_id 列表
+    """
+    file_upload_ids = []
+
+    if not message.photo:
+        return file_upload_ids
+
+    # Telegram 返回多个分辨率的图片，最后一个是最高分辨率
+    photo = message.photo[-1]
+
+    try:
+        # 下载图片
+        file = context.bot.get_file(photo.file_id)
+        temp_path = os.path.join(tempfile.gettempdir(), f"{photo.file_unique_id}.jpg")
+        file.download(temp_path)
+
+        try:
+            # 上传图片到 Notion
+            logger.info(f"开始上传图片到 Notion: {temp_path}")
+            file_upload_id = upload_image_to_notion(file_path=temp_path)
+
+            if file_upload_id:
+                file_upload_ids.append(file_upload_id)
+                logger.info(f"图片上传成功，file_upload_id: {file_upload_id}")
+            else:
+                logger.error("图片上传到 Notion 失败")
+
+        finally:
+            # 清理临时文件
+            try:
+                os.remove(temp_path)
+            except OSError as file_error:
+                logger.warning(f"无法删除临时文件：{file_error}")
+
+    except Exception as e:
+        logger.error(f"下载或上传图片时出错：{e}")
+
+    return file_upload_ids
 
 
 def process_message(update: Update, context: CallbackContext) -> None:
@@ -67,19 +119,18 @@ def process_message(update: Update, context: CallbackContext) -> None:
     # 如果消息包含图片，添加前缀
     if contains_photo:
         logger.info(
-            f"接收到包含图片的消息，用户 ID: {update.effective_user.id}，将只处理文字部分"
+            f"接收到包含图片的消息，用户 ID: {update.effective_user.id}，将处理图片和文字"
         )
 
-        # 如果图片消息没有文字说明
+        # 如果图片消息没有文字说明，使用默认说明
         if not text:
-            update.message.reply_text(
-                "⚠️ 收到图片但没有文字说明。请添加说明后重新发送，或者单独发送要保存的文字内容。",
-                parse_mode=None,  # 禁用 Markdown 解析
-            )
-            return
+            text = "图片消息"
+            content_for_storage = "图片消息"
+            content_for_analysis = "用户分享的图片"
+        else:
+            # 给原始内容添加前缀，表明它来自包含图片的消息
+            content_for_storage = f"[此内容来自包含图片的消息] {content_for_storage}"
 
-        # 给原始内容添加前缀，表明它来自包含图片的消息
-        content_for_storage = f"[此内容来自包含图片的消息] {content_for_storage}"
         logger.info(f"处理图片消息的文字内容，长度：{len(content_for_storage)} 字符")
 
     # 提取所有 URL（从实体和文本）
@@ -112,33 +163,43 @@ def process_message(update: Update, context: CallbackContext) -> None:
     if len(content_for_analysis) < 200:
         # 通知用户正在处理消息
         processing_msg = (
-            "正在处理消息..." if not contains_photo else "正在处理图片消息的文字内容..."
+            "正在处理消息..." if not contains_photo else "正在处理图片消息..."
         )
         update.message.reply_text(processing_msg, parse_mode=None)  # 禁用 Markdown 解析
 
+        # 如果有图片，先上传图片
+        file_upload_ids = []
+        if contains_photo:
+            file_upload_ids = download_and_upload_photos(message, context)
+
         # 仍需使用 Gemini API 分析提取标签
         analysis_result = analyze_content(content_for_analysis)
-        
+
         # 合并原始标签和 AI 标签
         merged_tags = merge_tags(original_hashtags, analysis_result["tags"])
-        
+
         # 存入 Notion，但使用原始内容作为摘要
         try:
             from services.notion_service import add_to_notion
 
-            # 注意：此处传递的 content 只包含文本，不包含任何图片数据
             result = add_to_notion(
                 content=content_for_storage,  # 保存包含标签的原始内容
                 summary=cleaned_text if cleaned_text.strip() else content_for_storage,  # 摘要使用清洁文本
                 tags=merged_tags,  # 使用合并后的标签
                 url=url,
                 created_at=created_at,
+                file_upload_ids=file_upload_ids if file_upload_ids else None,
             )
 
+            # 构建回复消息
+            reply_parts = ["✅ 已保存到 Notion"]
+            if file_upload_ids:
+                reply_parts.append(f"📷 已上传 {len(file_upload_ids)} 张图片")
+            reply_parts.append(f"📄 {result['title']}")
+            reply_parts.append(f"🔗 {result['url']}")
+
             update.message.reply_text(
-                f"✅ 已保存到 Notion\n"
-                f"📄 {result['title']}\n"
-                f"🔗 {result['url']}",
+                "\n".join(reply_parts),
                 parse_mode=None
             )
         except Exception as e:
@@ -153,13 +214,18 @@ def process_message(update: Update, context: CallbackContext) -> None:
     processing_msg = (
         "正在处理较长消息，这可能需要一点时间..."
         if not contains_photo
-        else "正在处理图片消息中的较长文字内容，这可能需要一点时间..."
+        else "正在处理图片消息，这可能需要一点时间..."
     )
     update.message.reply_text(processing_msg, parse_mode=None)  # 禁用 Markdown 解析
 
+    # 如果有图片，先上传图片
+    file_upload_ids = []
+    if contains_photo:
+        file_upload_ids = download_and_upload_photos(message, context)
+
     # 使用 Gemini API 完整分析内容（使用清洁文本）
     analysis_result = analyze_content(content_for_analysis)
-    
+
     # 合并原始标签和 AI 标签
     merged_tags = merge_tags(original_hashtags, analysis_result["tags"])
 
@@ -173,12 +239,18 @@ def process_message(update: Update, context: CallbackContext) -> None:
             tags=merged_tags,  # 使用合并后的标签
             url=url,
             created_at=created_at,
+            file_upload_ids=file_upload_ids if file_upload_ids else None,
         )
 
+        # 构建回复消息
+        reply_parts = ["✅ 已保存到 Notion"]
+        if file_upload_ids:
+            reply_parts.append(f"📷 已上传 {len(file_upload_ids)} 张图片")
+        reply_parts.append(f"📄 {result['title']}")
+        reply_parts.append(f"🔗 {result['url']}")
+
         update.message.reply_text(
-            f"✅ 已保存到 Notion\n"
-            f"📄 {result['title']}\n"
-            f"🔗 {result['url']}",
+            "\n".join(reply_parts),
             parse_mode=None
         )
     except Exception as e:

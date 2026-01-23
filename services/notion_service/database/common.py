@@ -10,6 +10,7 @@ from utils.helpers import truncate_text
 
 from ..client import get_notion_client
 from ..content_converter import convert_to_notion_blocks
+from ..file_upload import create_file_property_value
 
 logger = logging.getLogger(__name__)
 notion = get_notion_client()
@@ -221,7 +222,7 @@ def process_blocks_content(blocks, max_length=2000):
     return processed_blocks
 
 
-def add_to_notion(content, summary, tags, url="", created_at=None):
+def add_to_notion(content, summary, tags, url="", created_at=None, file_upload_ids=None):
     """
     将内容添加到 Notion 数据库
 
@@ -231,6 +232,7 @@ def add_to_notion(content, summary, tags, url="", created_at=None):
     tags (list): 合并后的标签列表（包含原始hashtag标签和AI生成的标签）
     url (str): 可选的 URL
     created_at (datetime): 创建时间
+    file_upload_ids (list): 可选的已上传图片 ID 列表
 
     返回：
     dict: 包含 page_id, title, url 的字典
@@ -267,6 +269,20 @@ def add_to_notion(content, summary, tags, url="", created_at=None):
     # 截断摘要，确保不超过 2000 个字符
     truncated_summary = summary[:2000] if summary else ""
 
+    # 准备基础属性
+    properties = {
+        "Name": {"title": [{"text": {"content": title}}]},
+        "Summary": {"rich_text": [{"text": {"content": truncated_summary}}]},
+        "Tags": {"multi_select": tag_objects},
+        "URL": {"url": url if url else None},
+        "Created": {"date": {"start": created_at.isoformat()}},
+    }
+
+    # 如果有图片，添加 Pictures 属性
+    if file_upload_ids:
+        properties["Pictures"] = create_file_property_value(file_upload_ids)
+        logger.info(f"添加 {len(file_upload_ids)} 张图片到 Pictures 属性")
+
     # 创建 Notion 页面
     try:
         # 块的数量
@@ -279,15 +295,7 @@ def add_to_notion(content, summary, tags, url="", created_at=None):
             # 先创建没有子块的页面
             new_page = notion.pages.create(
                 parent={"database_id": NOTION_DATABASE_ID},
-                properties={
-                    "Name": {"title": [{"text": {"content": title}}]},
-                    "Summary": {
-                        "rich_text": [{"text": {"content": truncated_summary}}]
-                    },
-                    "Tags": {"multi_select": tag_objects},
-                    "URL": {"url": url if url else None},
-                    "Created": {"date": {"start": created_at.isoformat()}},
-                },
+                properties=properties,
             )
 
             # 获取新创建页面的 ID
@@ -308,15 +316,7 @@ def add_to_notion(content, summary, tags, url="", created_at=None):
             # 如果块数量不超过限制，直接创建带有子块的页面
             new_page = notion.pages.create(
                 parent={"database_id": NOTION_DATABASE_ID},
-                properties={
-                    "Name": {"title": [{"text": {"content": title}}]},
-                    "Summary": {
-                        "rich_text": [{"text": {"content": truncated_summary}}]
-                    },
-                    "Tags": {"multi_select": tag_objects},
-                    "URL": {"url": url if url else None},
-                    "Created": {"date": {"start": created_at.isoformat()}},
-                },
+                properties=properties,
                 children=content_blocks,
             )
 

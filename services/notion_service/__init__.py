@@ -29,6 +29,12 @@ from .database.papers import (
     prepare_metadata_for_notion,
 )
 from .database.todo import add_to_todo_database
+from .file_upload import (
+    create_file_property_value,
+    create_image_block,
+    upload_image_to_notion,
+    upload_multiple_images,
+)
 
 __all__ = [
     "get_notion_client",
@@ -56,4 +62,8 @@ __all__ = [
     "append_blocks_in_batches",
     "determine_title",
     "get_weekly_entries",  # 添加到 __all__ 列表
+    "upload_image_to_notion",
+    "upload_multiple_images",
+    "create_file_property_value",
+    "create_image_block",
 ]
