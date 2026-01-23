@@ -12,13 +12,32 @@ import os
 from typing import Optional
 
 import requests
+import urllib3
 
 from config import NOTION_TOKEN
+
+# 禁用 SSL 警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
 NOTION_API_BASE = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
+
+
+def get_proxy_settings():
+    """获取代理设置"""
+    proxy_url = (
+        os.environ.get("https_proxy")
+        or os.environ.get("http_proxy")
+        or os.environ.get("all_proxy")
+    )
+    if proxy_url:
+        return {
+            "http": proxy_url,
+            "https": proxy_url,
+        }
+    return None
 
 
 def get_notion_headers():
@@ -42,7 +61,10 @@ def create_file_upload() -> Optional[dict]:
     headers["Content-Type"] = "application/json"
 
     try:
-        response = requests.post(url, headers=headers, json={})
+        response = requests.post(
+            url, headers=headers, json={},
+            proxies=get_proxy_settings(), verify=False
+        )
         response.raise_for_status()
 
         data = response.json()
@@ -80,7 +102,10 @@ def upload_file_to_notion(upload_url: str, file_path: str, filename: str = None)
             files = {
                 'file': (filename, f)
             }
-            response = requests.post(upload_url, headers=headers, files=files)
+            response = requests.post(
+                upload_url, headers=headers, files=files,
+                proxies=get_proxy_settings(), verify=False
+            )
             response.raise_for_status()
 
         logger.info(f"成功上传文件: {filename}")
@@ -113,7 +138,10 @@ def upload_file_bytes_to_notion(upload_url: str, file_bytes: bytes, filename: st
         files = {
             'file': (filename, file_bytes)
         }
-        response = requests.post(upload_url, headers=headers, files=files)
+        response = requests.post(
+            upload_url, headers=headers, files=files,
+            proxies=get_proxy_settings(), verify=False
+        )
         response.raise_for_status()
 
         logger.info(f"成功上传文件: {filename}")
