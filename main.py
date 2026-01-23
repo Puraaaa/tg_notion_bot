@@ -141,25 +141,38 @@ def init_bot(
     return None
 
 
+# 全局变量，用于存储 updater 实例
+_updater = None
+
+
 def schedule_weekly_report():
     """安排周报生成任务"""
     schedule_day = WEEKLY_REPORT_DAY.lower()
     schedule_hour = f"{WEEKLY_REPORT_HOUR:02d}:00"
 
+    def scheduled_weekly_report():
+        """定时任务包装函数，传入 bot 和用户 ID"""
+        if _updater and _updater.bot:
+            generate_weekly_report(
+                bot=_updater.bot, chat_ids=list(ALLOWED_USER_IDS)
+            )
+        else:
+            generate_weekly_report()
+
     if schedule_day == "monday":
-        schedule.every().monday.at(schedule_hour).do(generate_weekly_report)
+        schedule.every().monday.at(schedule_hour).do(scheduled_weekly_report)
     elif schedule_day == "tuesday":
-        schedule.every().tuesday.at(schedule_hour).do(generate_weekly_report)
+        schedule.every().tuesday.at(schedule_hour).do(scheduled_weekly_report)
     elif schedule_day == "wednesday":
-        schedule.every().wednesday.at(schedule_hour).do(generate_weekly_report)
+        schedule.every().wednesday.at(schedule_hour).do(scheduled_weekly_report)
     elif schedule_day == "thursday":
-        schedule.every().thursday.at(schedule_hour).do(generate_weekly_report)
+        schedule.every().thursday.at(schedule_hour).do(scheduled_weekly_report)
     elif schedule_day == "friday":
-        schedule.every().friday.at(schedule_hour).do(generate_weekly_report)
+        schedule.every().friday.at(schedule_hour).do(scheduled_weekly_report)
     elif schedule_day == "saturday":
-        schedule.every().saturday.at(schedule_hour).do(generate_weekly_report)
+        schedule.every().saturday.at(schedule_hour).do(scheduled_weekly_report)
     else:  # 默认周日
-        schedule.every().sunday.at(schedule_hour).do(generate_weekly_report)
+        schedule.every().sunday.at(schedule_hour).do(scheduled_weekly_report)
 
     logger.info(f"已安排周报生成任务：每{WEEKLY_REPORT_DAY} {schedule_hour}")
 
@@ -203,6 +216,7 @@ def signal_handler(sig, frame):
 
 def main():
     """主函数，启动机器人"""
+    global _updater
     logger.info("启动 TG-Notion 机器人...")
 
     # 加载环境变量
@@ -234,6 +248,9 @@ def main():
 
     # 注册命令处理程序
     updater = setup_telegram_bot(updater)
+
+    # 保存到全局变量，供定时任务使用
+    _updater = updater
 
     # 设置定时任务
     schedule_weekly_report()
