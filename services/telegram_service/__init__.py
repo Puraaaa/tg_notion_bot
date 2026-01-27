@@ -5,6 +5,7 @@ from .handlers.message_handlers import process_document, process_message
 from .handlers.pdf_handlers import handle_pdf_document, handle_pdf_url
 from .handlers.todo_handlers import handle_todo_message
 from .handlers.url_handlers import handle_multiple_urls_message, handle_url_message
+from .message_queue import MessageOffsetManager, MessageQueueProcessor, ReconnectionManager
 from .utils import (
     enrich_analysis_with_metadata,
     extract_metadata_from_filename,
@@ -28,4 +29,7 @@ __all__ = [
     "error_handler",
     "extract_metadata_from_filename",
     "prepare_metadata_for_notion",
+    "MessageOffsetManager",
+    "MessageQueueProcessor",
+    "ReconnectionManager",
 ]

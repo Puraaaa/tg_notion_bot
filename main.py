@@ -29,7 +29,12 @@ from config import (
     WEEKLY_REPORT_DAY,
     WEEKLY_REPORT_HOUR,
 )
-from services.telegram_service import setup_telegram_bot
+from services.telegram_service import (
+    MessageOffsetManager,
+    MessageQueueProcessor,
+    ReconnectionManager,
+    setup_telegram_bot,
+)
 from services.weekly_report import generate_weekly_report
 from utils.keep_alive import KEEP_ALIVE
 
@@ -141,8 +146,11 @@ def init_bot(
     return None
 
 
-# 全局变量，用于存储 updater 实例
+# 全局变量，用于存储 updater 实例和消息队列组件
 _updater = None
+_offset_manager = None
+_queue_processor = None
+_reconnection_manager = None
 
 
 def schedule_weekly_report():
@@ -189,22 +197,44 @@ def run_scheduler():
 
 
 def check_connection():
-    """定期检查并维护连接"""
-    global should_exit
+    """定期检查并维护连接，集成消息队列处理"""
+    global should_exit, _reconnection_manager
 
     while not should_exit:
         try:
-            # 测试与 Telegram API 的连接
-            test_result = test_connectivity()
-            if not test_result:
-                logger.warning("检测到连接问题，尝试重新配置代理...")
-                # 重新配置代理
-                configure_proxy_for_telegram()
+            # 如果有重连管理器，使用它来检查连接和恢复消息
+            if _reconnection_manager:
+                # 获取消息处理器字典
+                message_handlers = _get_message_handlers()
+                _reconnection_manager.check_connection_and_recover(message_handlers)
+            else:
+                # 原有的连接检查逻辑
+                test_result = test_connectivity()
+                if not test_result:
+                    logger.warning("检测到连接问题，尝试重新配置代理...")
+                    # 重新配置代理
+                    configure_proxy_for_telegram()
         except Exception as e:
             logger.error(f"连接检查时出错：{e}")
 
         # 等待下次检查
         time.sleep(connection_check_interval)
+
+
+def _get_message_handlers():
+    """获取消息处理器字典，用于消息队列处理"""
+    # 这里需要根据实际的处理器来配置
+    # 由于原代码使用 dispatcher，我们需要从中提取处理器
+    if _updater and _updater.dispatcher:
+        from services.telegram_service.handlers.message_handlers import process_message
+        from services.telegram_service.handlers.command_handlers import start, help_command
+
+        return {
+            'message': process_message,
+            'callback_query': None,  # 如果有回调查询处理器，在这里添加
+            'inline_query': None,    # 如果有内联查询处理器，在这里添加
+        }
+    return {}
 
 
 def signal_handler(sig, frame):
@@ -216,7 +246,7 @@ def signal_handler(sig, frame):
 
 def main():
     """主函数，启动机器人"""
-    global _updater
+    global _updater, _offset_manager, _queue_processor, _reconnection_manager
     logger.info("启动 TG-Notion 机器人...")
 
     # 加载环境变量
@@ -252,6 +282,31 @@ def main():
     # 保存到全局变量，供定时任务使用
     _updater = updater
 
+    # 初始化消息队列组件
+    try:
+        logger.info("初始化消息队列处理组件...")
+        _offset_manager = MessageOffsetManager()
+        _queue_processor = MessageQueueProcessor(updater.bot, _offset_manager)
+        _reconnection_manager = ReconnectionManager(updater.bot, _queue_processor)
+
+        # 启动时处理一次积压消息（如果有的话）
+        logger.info("检查并处理启动时的积压消息...")
+        message_handlers = _get_message_handlers()
+        processed, failed = _queue_processor.process_backlog_messages(message_handlers)
+        if processed > 0 or failed > 0:
+            logger.info(f"启动时处理积压消息完成，成功: {processed}, 失败: {failed}")
+
+        # 清理旧记录
+        _offset_manager.cleanup_old_records()
+
+        logger.info("消息队列处理组件初始化完成")
+    except Exception as e:
+        logger.error(f"初始化消息队列组件失败: {e}")
+        # 即使消息队列初始化失败，也继续启动机器人
+        _offset_manager = None
+        _queue_processor = None
+        _reconnection_manager = None
+
     # 设置定时任务
     schedule_weekly_report()
 
@@ -276,9 +331,12 @@ def main():
         logger.info("启动机器人轮询...")
 
         # 使用更优的轮询参数
+        # 注意：如果启用了消息队列处理，我们不应该 drop_pending_updates
+        drop_pending = _offset_manager is None  # 只有在消息队列未启用时才丢弃待处理更新
+
         updater.start_polling(
             timeout=30,  # 长轮询连接超时秒数
-            drop_pending_updates=True,  # 启动时删除待处理的更新
+            drop_pending_updates=drop_pending,  # 根据消息队列状态决定是否删除待处理更新
             allowed_updates=[
                 "message",
                 "callback_query",
