@@ -306,6 +306,16 @@ class MessageQueueProcessor:
             if len(updates) < self.batch_size:
                 break
 
+        # 关键：发送确认请求，告诉 Telegram 服务器这些消息已被处理
+        # 只有调用 getUpdates(offset=last_update_id + 1) 后，Telegram 才会丢弃这些消息
+        if current_offset is not None:
+            try:
+                logger.info(f"发送确认请求，offset={current_offset}，清除 Telegram 服务器上的消息队列")
+                self.bot.get_updates(offset=current_offset, limit=1, timeout=1)
+                logger.info("消息队列确认完成，Telegram 服务器已清除已处理的消息")
+            except Exception as e:
+                logger.warning(f"发送确认请求时出错（非致命）: {e}")
+
         logger.info(f"积压消息处理完成，成功: {processed_count}, 失败: {failed_count}")
         return processed_count, failed_count
 
