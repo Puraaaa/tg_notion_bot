@@ -101,7 +101,12 @@ def setup_telegram_bot(updater=None):
     )
 
     from .handlers.command_handlers import help_command, start, weekly_report_command
-    from .handlers.message_handlers import process_document, process_message
+    from .handlers.message_handlers import process_document, process_message, process_media_group
+    from .media_group import init_collector
+
+    # 初始化 media group 收集器
+    init_collector(process_media_group)
+    logger.info("已初始化 MediaGroupCollector")
 
     # 创建用户过滤器
     user_filter = Filters.user(user_id=ALLOWED_USER_IDS) if ALLOWED_USER_IDS else None

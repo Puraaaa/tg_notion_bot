@@ -1,8 +1,9 @@
 import logging
 import os
 import tempfile
+from typing import List
 
-from telegram import Update
+from telegram import Message, Update
 from telegram.ext import CallbackContext
 
 from config import ALLOWED_USER_IDS
@@ -75,12 +76,74 @@ def download_and_upload_photos(message, context) -> list:
     return file_upload_ids
 
 
+def download_and_upload_photos_batch(messages: List[Message], context: CallbackContext) -> list:
+    """
+    批量下载多条消息中的图片并上传到 Notion
+
+    参数：
+        messages: Telegram 消息对象列表（来自同一 media group）
+        context: Telegram 上下文对象
+
+    返回：
+        list: 成功上传的 file_upload_id 列表，顺序与消息顺序一致
+    """
+    file_upload_ids = []
+
+    for message in messages:
+        if not message.photo:
+            continue
+
+        # Telegram 返回多个分辨率的图片，最后一个是最高分辨率
+        photo = message.photo[-1]
+
+        try:
+            # 下载图片
+            file = context.bot.get_file(photo.file_id)
+            temp_path = os.path.join(tempfile.gettempdir(), f"{photo.file_unique_id}.jpg")
+            file.download(temp_path)
+
+            try:
+                # 上传图片到 Notion
+                logger.info(f"开始上传图片到 Notion: {temp_path}")
+                file_upload_id = upload_image_to_notion(file_path=temp_path)
+
+                if file_upload_id:
+                    file_upload_ids.append(file_upload_id)
+                    logger.info(f"图片上传成功，file_upload_id: {file_upload_id}")
+                else:
+                    logger.error("图片上传到 Notion 失败")
+
+            finally:
+                # 清理临时文件
+                try:
+                    os.remove(temp_path)
+                except OSError as file_error:
+                    logger.warning(f"无法删除临时文件：{file_error}")
+
+        except Exception as e:
+            logger.error(f"下载或上传图片时出错：{e}")
+
+    return file_upload_ids
+
+
 def process_message(update: Update, context: CallbackContext) -> None:
     """处理收到的消息"""
     if update.effective_user.id not in ALLOWED_USER_IDS:
         return
 
     message = update.message
+
+    # 检测是否是 media group（多图消息）
+    if message.media_group_id and message.photo:
+        from ..media_group import get_collector
+        collector = get_collector()
+        if collector and collector.add_message(update, context):
+            # 消息已加入收集器，等待统一处理
+            logger.info(
+                f"消息 {message.message_id} 加入 media group {message.media_group_id}"
+            )
+            return
+
     text = None
     entities = None
     contains_photo = message.photo and len(message.photo) > 0
@@ -274,3 +337,115 @@ def process_document(update: Update, context: CallbackContext) -> None:
     else:
         # 对于非 PDF 文件，使用常规处理
         process_message(update, context)
+
+
+def process_media_group(messages: List[Message], update: Update, context: CallbackContext) -> None:
+    """
+    处理 media group（多图消息）
+
+    参数：
+        messages: 属于同一 media group 的所有消息列表，已按 message_id 排序
+        update: 第一条消息的 update 对象（用于回复）
+        context: Telegram 上下文对象
+    """
+    if not messages:
+        logger.warning("process_media_group 收到空消息列表")
+        return
+
+    logger.info(f"开始处理 media group，共 {len(messages)} 张图片")
+
+    # 获取第一条消息（通常包含 caption）
+    first_message = messages[0]
+
+    # 提取文本内容（caption 通常只在第一条消息中）
+    text = ""
+    entities = []
+    for msg in messages:
+        if msg.caption:
+            text = msg.caption
+            entities = msg.caption_entities or []
+            break
+
+    # 获取创建时间
+    created_at = first_message.date
+
+    # 通知用户正在处理
+    try:
+        context.bot.send_message(
+            chat_id=first_message.chat_id,
+            text=f"正在处理 {len(messages)} 张图片...",
+            reply_to_message_id=first_message.message_id,
+            parse_mode=None
+        )
+    except Exception as e:
+        logger.warning(f"发送处理通知失败: {e}")
+
+    # 批量上传所有图片
+    file_upload_ids = download_and_upload_photos_batch(messages, context)
+    logger.info(f"成功上传 {len(file_upload_ids)} 张图片")
+
+    # 处理文本内容
+    if text:
+        parsed_content = parse_message_entities(text, entities)
+        original_hashtags = extract_hashtags(parsed_content["text"])
+        cleaned_text = remove_hashtags_from_text(parsed_content["text"])
+
+        if not cleaned_text.strip() or len(cleaned_text.strip()) < 10:
+            content_for_analysis = parsed_content["text"]
+            content_for_storage = parsed_content["text"]
+        else:
+            content_for_analysis = cleaned_text
+            content_for_storage = parsed_content["text"]
+
+        # 给原始内容添加前缀
+        content_for_storage = f"[此内容来自包含 {len(messages)} 张图片的消息] {content_for_storage}"
+    else:
+        # 没有文字说明
+        content_for_storage = f"图片消息（{len(messages)} 张图片）"
+        content_for_analysis = "用户分享的多张图片"
+        original_hashtags = []
+        cleaned_text = ""
+
+    # 提取 URL
+    urls = extract_urls_from_entities(text, entities) if text else []
+    url = urls[0] if urls else ""
+
+    # 使用 Gemini API 分析内容
+    analysis_result = analyze_content(content_for_analysis)
+
+    # 合并原始标签和 AI 标签
+    merged_tags = merge_tags(original_hashtags, analysis_result["tags"])
+
+    # 存入 Notion
+    try:
+        from services.notion_service import add_to_notion
+
+        result = add_to_notion(
+            content=content_for_storage,
+            summary=cleaned_text if cleaned_text.strip() else content_for_storage,
+            tags=merged_tags,
+            url=url,
+            created_at=created_at,
+            file_upload_ids=file_upload_ids if file_upload_ids else None,
+        )
+
+        # 构建回复消息
+        reply_parts = ["✅ 已保存到 Notion"]
+        reply_parts.append(f"📷 已上传 {len(file_upload_ids)} 张图片")
+        reply_parts.append(f"📄 {result['title']}")
+        reply_parts.append(f"🔗 {result['url']}")
+
+        context.bot.send_message(
+            chat_id=first_message.chat_id,
+            text="\n".join(reply_parts),
+            reply_to_message_id=first_message.message_id,
+            parse_mode=None
+        )
+    except Exception as e:
+        logger.error(f"添加到 Notion 时出错：{e}")
+        context.bot.send_message(
+            chat_id=first_message.chat_id,
+            text=f"⚠️ 保存到 Notion 时出错：{str(e)}",
+            reply_to_message_id=first_message.message_id,
+            parse_mode=None
+        )
