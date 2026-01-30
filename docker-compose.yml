@@ -20,6 +20,7 @@ services:
     networks:
       - proxy_network
     volumes:
+      - .:/app
       - ./logs:/app/logs
       - ./.env:/app/.env
       - /Users/wangruochen/Zotero/storage/pdfs:/zotero/pdfs:ro
