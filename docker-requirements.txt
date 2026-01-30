@@ -15,3 +15,4 @@ pypdf>=3.0.0
 openai>=0.27.0
 pyzotero>=1.5.5  # 必需，用于 Zotero API 功能
 markdownify>=0.9.2  # 必需，用于将 HTML 转换为 Markdown
+firecrawl-py>=1.0.0,<2.0.0  # 锁定 1.x 版本，2.x+ API 不兼容

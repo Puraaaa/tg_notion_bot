@@ -99,8 +99,13 @@ def extract_url_content_with_beautifulsoup(url: str) -> Optional[str]:
         response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
         response.raise_for_status()
 
-        # 使用 BeautifulSoup 解析 HTML
-        soup = BeautifulSoup(response.text, "html.parser")
+        # 修复编码问题：优先使用响应头中的编码，否则自动检测
+        if response.encoding is None or response.encoding.lower() == 'iso-8859-1':
+            # requests 默认使用 ISO-8859-1，需要从内容中检测真实编码
+            response.encoding = response.apparent_encoding
+
+        # 使用 BeautifulSoup 解析 HTML，指定 from_encoding 确保正确解码
+        soup = BeautifulSoup(response.content, "html.parser", from_encoding=response.encoding)
 
         # 提取标题
         title = soup.title.string if soup.title else ""

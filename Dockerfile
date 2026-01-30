@@ -4,19 +4,17 @@ FROM python:3.10-slim
 # 设置工作目录
 WORKDIR /app
 
-# 复制项目文件
-COPY . /app/
+# 先复制requirements文件，利用Docker层缓存
+COPY docker-requirements.txt .
 
-# 安装依赖 - 使用docker特定的requirements
-RUN pip install --no-cache-dir -r docker-requirements.txt && \
-    # 明确安装SOCKS支持
-    pip install --no-cache-dir PySocks requests[socks] && \
-    # 禁用Python警告
-    pip install --no-cache-dir --upgrade urllib3==1.26.15 && \
-    # 确保pyzotero已安装（使用引号避免shell解析版本号）
-    pip install --no-cache-dir "pyzotero>=1.5.5" && \
+# 安装依赖 - 使用国内镜像源加速
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple/ \
+    -r docker-requirements.txt && \
     # 验证安装
-    python -c "import socks; import pyzotero; print('PySocks and pyzotero installed successfully')"
+    python -c "import socks; import pyzotero; print('Dependencies installed successfully')"
+
+# 复制项目文件
+COPY . .
 
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1

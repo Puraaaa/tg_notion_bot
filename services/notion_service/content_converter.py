@@ -354,8 +354,11 @@ def parse_markdown_formatting(text):
             # 标准文本格式
             rich_text = {"text": {"content": content}}
 
-            if format_type == "link" and url:
-                rich_text["text"]["link"] = {"url": url}
+            if format_type == "link" and link_data:
+                # 验证 URL 是否有效（必须是完整的 http/https URL）
+                if link_data.startswith(("http://", "https://")):
+                    rich_text["text"]["link"] = {"url": link_data}
+                # 如果是相对路径或无效 URL，不添加链接，只保留文本
 
             # 设置文本的格式注释
             annotations = {
