@@ -71,5 +71,8 @@ if not ZOTERO_API_KEY or not ZOTERO_USER_ID:
 # OpenAI API 配置 (如果使用)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+# Firecrawl 配置（用于网页内容抓取）
+FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
+
 # 日志配置
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
