@@ -14,6 +14,30 @@ from ..file_upload import create_file_property_value
 
 logger = logging.getLogger(__name__)
 notion = get_notion_client()
+_NOTION_PARENT_CACHE = None
+
+
+def _get_notion_parent():
+    """
+    根据数据库结构返回 pages.create 的 parent：
+    - 单数据源：{"database_id": ...}
+    - 多数据源：{"data_source_id": ...}（默认取第一个数据源）
+    """
+    global _NOTION_PARENT_CACHE
+    if _NOTION_PARENT_CACHE:
+        return _NOTION_PARENT_CACHE
+
+    try:
+        db_info = notion.databases.retrieve(database_id=NOTION_DATABASE_ID)
+        data_sources = db_info.get("data_sources") or []
+        if data_sources:
+            _NOTION_PARENT_CACHE = {"data_source_id": data_sources[0]["id"]}
+        else:
+            _NOTION_PARENT_CACHE = {"database_id": NOTION_DATABASE_ID}
+    except Exception:
+        _NOTION_PARENT_CACHE = {"database_id": NOTION_DATABASE_ID}
+
+    return _NOTION_PARENT_CACHE
 
 
 def _split_text_into_chunks(text, max_length):
@@ -285,6 +309,7 @@ def add_to_notion(content, summary, tags, url="", created_at=None, file_upload_i
 
     # 创建 Notion 页面
     try:
+        parent = _get_notion_parent()
         # 块的数量
         blocks_count = len(content_blocks)
 
@@ -294,7 +319,7 @@ def add_to_notion(content, summary, tags, url="", created_at=None, file_upload_i
 
             # 先创建没有子块的页面
             new_page = notion.pages.create(
-                parent={"database_id": NOTION_DATABASE_ID},
+                parent=parent,
                 properties=properties,
             )
 
@@ -315,7 +340,7 @@ def add_to_notion(content, summary, tags, url="", created_at=None, file_upload_i
         else:
             # 如果块数量不超过限制，直接创建带有子块的页面
             new_page = notion.pages.create(
-                parent={"database_id": NOTION_DATABASE_ID},
+                parent=parent,
                 properties=properties,
                 children=content_blocks,
             )
