@@ -15,6 +15,7 @@ from ..file_upload import create_file_property_value
 logger = logging.getLogger(__name__)
 notion = get_notion_client()
 _NOTION_PARENT_CACHE = None
+_NOTION_QUERY_PARENT_CACHE = {}
 
 
 def _get_notion_parent():
@@ -38,6 +39,45 @@ def _get_notion_parent():
         _NOTION_PARENT_CACHE = {"database_id": NOTION_DATABASE_ID}
 
     return _NOTION_PARENT_CACHE
+
+
+def _get_notion_query_parent(database_id):
+    """
+    根据数据库结构返回查询参数：
+    - 单数据源：{"database_id": ...}
+    - 多数据源：{"data_source_id": ...}（默认取第一个数据源）
+    """
+    cached = _NOTION_QUERY_PARENT_CACHE.get(database_id)
+    if cached:
+        return cached
+
+    try:
+        db_info = notion.databases.retrieve(database_id=database_id)
+        data_sources = db_info.get("data_sources") or []
+        if data_sources:
+            query_parent = {"data_source_id": data_sources[0]["id"]}
+        else:
+            query_parent = {"database_id": database_id}
+    except Exception:
+        query_parent = {"database_id": database_id}
+
+    _NOTION_QUERY_PARENT_CACHE[database_id] = query_parent
+    return query_parent
+
+
+def _query_notion_database(database_id, **kwargs):
+    """
+    兼容 notion-client 2.x/3.x 的数据库查询封装。
+    3.x 需使用 data_sources.query，2.x 使用 databases.query。
+    """
+    query_parent = _get_notion_query_parent(database_id)
+
+    if "data_source_id" in query_parent and hasattr(notion, "data_sources"):
+        return notion.data_sources.query(
+            data_source_id=query_parent["data_source_id"], **kwargs
+        )
+
+    return notion.databases.query(database_id=database_id, **kwargs)
 
 
 def _split_text_into_chunks(text, max_length):
@@ -450,8 +490,8 @@ def get_weekly_entries(days=7):
 
     # 查询 Notion 数据库
     try:
-        response = notion.databases.query(
-            database_id=NOTION_DATABASE_ID,
+        response = _query_notion_database(
+            NOTION_DATABASE_ID,
             filter={
                 "and": [
                     {
