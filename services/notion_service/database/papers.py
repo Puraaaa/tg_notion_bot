@@ -12,7 +12,7 @@ from config import NOTION_PAPERS_DATABASE_ID
 
 from ..client import get_notion_client
 from ..content_converter import convert_to_notion_blocks
-from .common import append_blocks_in_batches
+from .common import append_blocks_in_batches, _query_notion_database
 
 logger = logging.getLogger(__name__)
 notion = get_notion_client()
@@ -59,7 +59,7 @@ def get_existing_dois():
         has_more = True
 
         while has_more:
-            response = notion.databases.query(
+            response = _query_notion_database(
                 database_id=NOTION_PAPERS_DATABASE_ID,
                 start_cursor=start_cursor,
                 page_size=100,  # 每页最多获取 100 条
@@ -453,7 +453,7 @@ def check_paper_exists_in_notion(doi: str = None, zotero_id: str = None) -> bool
 
         # 首先通过 DOI 检查（如果提供）
         if doi:
-            response = notion.databases.query(
+            response = _query_notion_database(
                 database_id=NOTION_PAPERS_DATABASE_ID,
                 filter={"property": "DOI", "rich_text": {"equals": doi}},
             )
@@ -465,7 +465,7 @@ def check_paper_exists_in_notion(doi: str = None, zotero_id: str = None) -> bool
 
         # 如果 DOI 检查未找到结果，且提供了 ZoteroID，则通过 ZoteroID 检查
         if zotero_id:
-            response = notion.databases.query(
+            response = _query_notion_database(
                 database_id=NOTION_PAPERS_DATABASE_ID,
                 filter={"property": "ZoteroID", "rich_text": {"equals": zotero_id}},
             )
@@ -507,7 +507,7 @@ def get_existing_zotero_ids():
         has_more = True
 
         while has_more:
-            response = notion.databases.query(
+            response = _query_notion_database(
                 database_id=NOTION_PAPERS_DATABASE_ID,
                 start_cursor=start_cursor,
                 page_size=100,  # 每页最多获取 100 条
