@@ -37,3 +37,7 @@ service_copy/
 
 # 测试文件
 tests/
+
+# 运行时数据与缓存
+data/
+cache/
